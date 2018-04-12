@@ -1,0 +1,419 @@
+#!/bin/bash -e 
+trap "rm -f temp*; echo 'Signal Caught';  exit 1" SIGINT SIGHUP SIGTERM
+
+tempStdin=temp$$
+tempHolder=tempT$$
+rows=0
+cols=0
+
+#########################################################################
+#   dims()
+#   Calculates the dimensions of an m by n matrix. 
+#
+#   Input: 
+#           matrix passed by stdin or a file in correct file format.
+#   Output:
+#           echo "m n" to stdout. 
+#           Return 0.
+#########################################################################
+dims() {
+    # Begin row counting.
+    while read newLine
+    do
+	rows=$(expr $rows + 1)
+    done < $input
+
+    # Begin column counting.
+    colCalc=$(head -n 1 $input)
+    for elem in $colCalc
+    do
+	cols=$(expr $cols + 1)
+    done
+    
+    # Display number of rows and columns.
+    echo "$rows $cols"
+    return 0
+}
+
+#########################################################################
+#   transpose()
+#   Transposes an m by n matrix along the diagonal to an n by m matrix. 
+#
+#   Input: 
+#           matrix passed by stdin or a file in correct file format.
+#   Output: 
+#           echo transposed matrix to stdout. 
+#           Return 0.
+#########################################################################
+transpose() {
+    # Use a temporary matrix to hold transposed matrix.
+    tempArr=$tempHolder
+
+    # Count the number of columns necessary.  This is used to delete the trailing tab.
+    rowNum=0
+    while read newLine
+    do
+	rowNum=$(expr $rowNum + 1)
+    done < $input
+
+    # colCalc splices just the first row of original matrix, and count # of elements in it.
+    colCalc=$(head -n 1 $input)
+    colCounter=0
+    for elem in $colCalc
+    do
+	# Cut each column into variable newCol and paste each element into tempArr.
+	colCounter=$(expr $colCounter + 1)
+	newCol=$(cut -f $colCounter $input)
+	elemNum=0
+	for newElem in $newCol
+	do
+	    elemNum=$(expr $elemNum + 1 )
+	    # Not the last element in the row, add a trailing tab.
+	    if [ $elemNum != $rowNum ]
+		then
+		echo -ne "$newElem\t" >> $tempArr
+	    # Otherwise, no trailing tab added.
+	    else
+		echo -ne "$newElem" >> $tempArr
+	    fi
+	done
+	echo -ne "\n" >> $tempArr
+    done
+    # Display and delete tempArr.
+    cat $tempArr
+    rm -f $tempArr
+    return 0
+}
+
+#########################################################################
+#   mean()
+#   Calculates the mean of values in each column in a matrix.  Rounds
+#   decimals to nearest whole integers. 
+#   
+#   Input: 
+#           matrix passed by stdin or a file in correct file format.
+#   Output: 
+#           echo row matrix of mean values to stdout. Return 0.
+#########################################################################
+mean() {
+    # Define temporary variables, counter and bool.
+    tempArr=$tempHolder
+    tempVar=0
+    count=0
+    boolean=0
+    numCols=0
+
+    colCalc=$(head -n 1 $input)
+    colCounter=0
+
+    # Count total number of columns in matrix.
+    for elem in $colCalc
+    do
+	numCols=$(( $numCols + 1 ))
+    done
+
+    # Each line in input.
+    for elem in $colCalc
+    do
+	# Cut a column from array into newCol.
+	colCounter=$(( $colCounter + 1 ))
+	newCol=$(cut -f $colCounter $input)
+       
+	# Update counter (for division at end) and sum elements in column.
+	for i in $newCol
+	do
+	    count=$(( $count + 1))
+	    tempVar=$(( $tempVar + $i ))
+	done
+	
+	# Rounding division.
+	tempVar=$(( ($tempVar + ( $count / 2 ) * ( ( ( $tempVar > 0 ) * 2) - 1  )) / $count ))
+	
+	# Place mean values into tempArr.
+	if [ "$numCols" -ne "$colCounter" ]
+	then
+	    echo -ne "$tempVar\t" >> $tempArr
+	else
+	    echo -ne "$tempVar\n" >> $tempArr
+	fi
+
+	# Reset tempVar and count for next row.
+	tempVar=0
+	count=0
+
+    done
+
+    # Display and delete tempArr.
+    cat $tempArr
+    rm -f $tempArr
+}
+
+#########################################################################
+#   add()
+#   Perform matrix addition on two matrices of compatible dimensions.
+#   
+#   Input: 
+#          information passed by stdin or a file in correct file format.
+#          Parameters $1 and $2 are used as matrix 1 and 2 input.
+#   Output: 
+#          echo summation matrix to stdout.  Return 0.
+#          if matrices have incompatible dimensions, echo error msg to
+#          stderr and return 1.
+#########################################################################
+add() {
+    # Define temporary array and counters.
+    row1=0
+    row2=0
+    col1=0
+    col2=0
+    tempArr=$tempHolder
+
+    # Find dimensions of $1.
+    while read newLine # $1 Rows
+    do
+	row1=$(expr $row1 + 1)
+    done < $1
+
+    colCalc=$(head -n 1 $1) # $1 Cols
+    for elem in $colCalc
+    do
+	col1=$(expr $col1 + 1)
+    done
+
+    # Find dimensions of $2.
+    while read newLine # $2 Rows
+    do
+	row2=$(expr $row2 + 1)
+    done < $2
+
+    colCalc=$(head -n 1 $2) # $2 Cols
+    for elem in $colCalc
+    do
+	col2=$(expr $col2 + 1)
+    done
+
+    # Check that matrices have the same dimensions.
+    if [ $row1 != $row2 ] || [ $col1 != $col2 ]
+    then
+	echo "ERROR: Dimensions of both matrices must be the same." 1>&2
+	return 1
+    else
+    # Matrix addition algorithm.
+	rowIndex=0
+	colIndex=0
+	# Row counter.
+	while read nextLine
+	do
+	    rowIndex=$(expr $rowIndex + 1)
+	    # Column counter.
+	    for i in $nextLine
+	    do       
+		# Use row and col counter to get next elements to sum.
+		colIndex=$(expr $colIndex + 1)
+		elem1=$(head -n $rowIndex $1 | tail -n 1 | cut -f $colIndex)
+		elem2=$(head -n $rowIndex $2 | tail -n 1 | cut -f $colIndex)
+
+		# Sum next elements.
+		sum=$(( $elem1 + $elem2))
+		
+		# Place sum into tempArr.
+		endOfCol=$(( $colIndex % $col1))
+		if [ $endOfCol -ne 0 ]
+		then
+		    echo -ne "$sum\t" >> $tempArr
+		else
+		    echo -ne "$sum\n" >> $tempArr
+		fi
+	    done
+	    colIndex=0
+	done < $1
+	
+	# Display tempArr to stdout and delete tempArr.
+	cat $tempArr
+	rm -r $tempArr
+    fi	
+    return 0
+}
+
+#########################################################################
+#   multiply()
+#   Perform dot product on two matrices of compatible dimensions.
+#   
+#   Input: 
+#          information passed by stdin or a file in correct file format.
+#          Parameters $1 and $2 are used as matrix 1 and 2 input.
+#   Output: 
+#          echo product matrix to stdout.  Return 0.
+#          if matrices have incompatible dimensions, echo error msg to
+#          stderr and return 1.
+#########################################################################
+multiply() {
+    # Define temporary array and counters.
+    row2=0
+    col1=0
+    col2=0
+    tempArr=$tempHolder
+
+    # Find number of columns in $1
+    colCalc=$(head -n 1 $1)
+    for elem in $colCalc
+    do
+	col1=$(expr $col1 + 1)
+    done
+
+    # Find number of columns in $2.  Used while appending result to tempArr.
+    colCalc2=$(head -n 1 $2)
+    for elem in $colCalc2
+    do
+	col2=$(expr $col2 + 1)
+    done
+
+    # Find number of rows in $2.
+    while read newLine
+    do
+	row2=$(expr $row2 + 1)
+    done < $2
+
+    # Check that matrices have compatible dimensions.
+    # Column # of $1 must be the same as row # of $2.
+    if [ $col1 != $row2 ]
+    then
+	echo "ERROR: arg1 col# != arg2 row#" 1>&2
+	return 1
+    else
+    # If dimensions are correct, begin product algorithm.
+        # Dot product variables and tempArray.
+	rowIndex=0
+	colIndex=0
+	index=0
+	product=0
+	m2Cols=$(head -n 1 $2)
+	
+	# Iterate through each row of $1.
+	while read nextLine
+	do
+	    rowIndex=$(expr $rowIndex + 1)
+	    
+	    # Match current ROW in $1 to each COL in $2.
+	    for m2Elem in $m2Cols
+	    do
+		colIndex=$(expr $colIndex + 1)
+		
+		# i'th row value in $1 must be multiplied to i'th col value in $2.
+		for i in $nextLine
+		do
+		    index=$(expr $index + 1)
+		    elem1=$(head -n $rowIndex $1 | tail -n 1 | cut -f $index)
+		    elem2=$(cut -f $colIndex $2| head -n $index | tail -n 1)
+		    
+		    # Perform dot multiplication and add product to product variable.
+		    intProd=$(( $elem1 * $elem2 ))
+		    product=$(( $intProd + $product ))
+		done
+		
+		# Parse to $tempArr.  Do not parse a tab if last val in column.
+		if [ $colIndex != $col2 ]
+		then
+		    echo -ne "$product\t" >> $tempArr
+		else
+		    echo -ne "$product\n" >> $tempArr
+		fi
+		
+		# Reset product and index for next iteration.
+		product=0
+		index=0
+	    done
+	    colIndex=0
+	done < $1
+	
+	# Display tempArr to stdout and delete tempArr.
+	cat $tempArr
+	rm -f $tempArr
+    fi   
+}
+
+# BEGIN MAIN FUNCTION ###########################################################
+
+# Check to see that there are at least two arguments if stdin is empty.
+stdinTest=0
+if [ -t "$stdinTest" ] && [ "$#" -lt 2 ]
+then
+    echo "ERROR: Invalid input." 1>&2
+    exit 1
+fi
+
+# Checker for file or stdin input and correct minimum number of parameters.
+if [ ! -z $2 ] # Use file input.
+then
+    if [ "$#" -lt 2 ] || [ ! -r "$2" ]
+    then
+	echo "ERROR: Invalid input." 1>&2
+	exit 1
+    else
+	input=$2
+    fi
+else # Use stdin input.
+    if [ $# -lt 1 ]
+    then
+	echo "ERROR: Invalid input." 1>&2
+	exit 1
+    else
+	while read newLine
+	do
+	    echo -e "$newLine" >> $tempStdin
+	done < /dev/stdin
+	input=$tempStdin
+    fi
+fi
+
+# dims(), transpose() and mean() must have at most 2 arguments. 
+if [ $1 == "dims" ] || [ $1 == "transpose" ] || [ $1 == "mean" ]
+then
+    if [ $# -gt 2 ] || [ $# -lt 1 ]
+    then
+	echo "ERROR: Invalid number of arguments." 1>&2
+	exit 1
+    # Switch statement for dims(), transpose() and mean().
+    elif [ $1 == "dims" ]
+    then 
+	dims
+    elif [ $1 == "transpose" ]
+    then
+	transpose
+    elif [ $1 == "mean" ] 
+    then
+	mean
+    fi
+
+# add() and multiply() must have three arguments.
+elif [ $1 == "add" ] || [ $1 == "multiply" ]
+then
+    if [ ! -r "$2" ] || [ ! -r "$3" ]
+    then
+	echo "ERROR: Invalid input." 1>&2
+	exit 1
+    elif [ $# -gt 3 ] || [ $# -lt 3 ]
+    then
+	echo "ERROR: Invalid number of arguments." 1>&2
+	exit 1
+    # Swtich statement for add() and multiply() functions.
+    elif [ $1 == "add" ]
+    then 
+	add $2 $3
+    elif [ $1 == "multiply" ]
+    then
+	multiply $2 $3
+    fi 
+
+# Case that a function name is invalid.
+else
+    echo "ERROR: Invalid function." 1>&2
+    exit 1
+fi
+
+# Remove any generated temporary files used for stdin input.
+if [ "$input" != "$2" ]
+then
+    rm -r $tempStdin
+fi
+exit 0
